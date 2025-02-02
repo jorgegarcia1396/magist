@@ -1,0 +1,856 @@
+# GEOG 498 - Unit 2
+
+**Visualizing and Querying Geospatial Data**
+
+This R notebook performs analysis for the Unit 2 project.
+
+------------------------------------------------------------------------
+
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(tmap)
+library(tmaptools)
+library(spdep)
+library(sf)
+library(here)
+library(scales)
+library(reshape2)
+library(biscale)
+library(cowplot)
+```
+
+```{r}
+tmap_mode(mode = "view")
+```
+
+```{r}
+url <- here("Unit 2", "tahoe open data", "District.geojson")
+
+districts <- st_read(dsn = url)
+
+head(as.data.frame(districts), 50)
+```
+
+```{r}
+tm_shape(districts) +
+    tm_polygons(fill = "green")
+```
+
+```{r}
+# Dissolve districts into single sfc.
+
+districts.combined <- st_make_valid(districts) %>% st_union()
+```
+
+```{r}
+tm_shape(districts.combined) +
+    tm_polygons(fill = "royalblue")
+```
+
+------------------------------------------------------------------------
+
+## Datasets for Assignment
+
+```{r}
+url <- here("Unit 2", "tahoe open data", "TRPA_Boundary.geojson")
+boundary <- st_read(dsn = url)
+```
+
+```{r}
+url <- here("Unit 2", "tahoe open data", "Community_Priority_Zones.geojson")
+community.zones <- st_read(dsn = url)
+
+# as.data.frame(community.zones)
+```
+
+```{r}
+url <- here("Unit 1", "tahoe open data", "Tahoe_Bus_Stops.geojson")
+bus.stops <- st_read(dsn = url)
+```
+
+```{r}
+url <- here("Unit 1", "tahoe open data", "Tahoe_Transit_Routes_(Consolidated).geojson")
+bus.routes <- st_read(dsn = url)
+```
+
+```{r}
+# as.data.frame(bus.routes) %>% group_by(ROUTE_TYPE) %>% summarise()
+```
+
+```{r}
+bike.routes <- st_read(here("Unit 1", "tahoe open data",
+                            "Bike_Trails_Existing.geojson"))
+
+bike.proposed <- st_read(here("Unit 1", "tahoe open data", 
+                              "Bike_Trails_Proposed.geojson"))
+```
+
+```{r}
+url <- here("Unit 2", "tahoe open data", "Tahoe_BlockGroup_2022_TDC_Values.geojson")
+tdc.values <- st_read(dsn = url)
+```
+
+```{r}
+url <- here("Unit 1", "tahoe open data", "2020_Regional_Transportation_Plan_Projects.geojson")
+rtp.projects <- st_read(dsn = url)
+```
+
+```{r}
+url <- here("Unit 1", "tahoe open data", "Tahoe_Bus_Stops.geojson")
+bus.stops <- st_read(dsn = url)
+```
+
+```{r}
+url <- here("Unit 1", "tahoe open data", "Bike_Trails_Existing.geojson")
+bike.routes <- st_read(dsn = url)
+```
+
+```{r}
+url <- here("Unit 1", "tahoe open data", "Bike_Trails_Proposed.geojson")
+bike.proposed <- st_read(dsn = url)
+```
+
+------------------------------------------------------------------------
+
+## **Part 1: Descriptive Statistics and Mapping**
+
+Create a series of six (6) maps showing the current distribution of Lake Tahoe transit stops, the Community Priority Zones, and the demographic variables used to identify those zones. 
+
+The first map should show the entire Lake Tahoe Region and include: Community Priority zones (labeled by name), Tahoe transit routes, Tahoe bus stops, the TRPA boundary layer (in order to delineate the area of interest and extent of the data), and one additional transportation layer that you consider most relevant to this particular report.
+
+```{r}
+credits <- paste("Tiles (c) Esri - Esri, DeLome, NAVTEQ,", 
+        "<a href='https://www.tahoeopendata.org/'>Tahoe Open Data</a>")
+
+tm_shape(boundary, name = "TRPA Boundary") +
+    tm_polygons(col = "darkblue", fill = NULL, lwd = 2) +
+    tm_shape(bus.stops, name = "Bus Stops") +
+    tm_dots(fill = "red", size = 0.3) +
+    tm_shape(community.zones, name = "Priority Zones") +
+    tm_polygons(fill = "cyan") +
+    tm_shape(bus.routes, name = "Bus Routes") +
+    tm_lines(col = "brown", lwd = 1.2) +
+    tm_shape(bike.routes, name = "Bike Routes (Existing)") +
+    tm_lines(col = "#4D7EAB", lwd = 0.9) +
+    tm_shape(bike.proposed, name = "Bike Routes (Proposed)") +
+    tm_lines(col = "purple", lwd = 0.9) +
+    tm_shape(community.zones, name = "Priority Zone Names") +
+    tm_text(text = "ZoneName", size = 1.3, col = "black") +
+    tm_title(text = "Regional Transportation Plan 2025 - Lake Tahoe Region") +
+    tm_add_legend(type = "symbols",
+                  position = c("bottom", "left"),
+                  labels = c("TRPA Boundary", "Bus Stops", "Bus Routes",
+                             "Priority Zones", "Bike Routes (Existing)",
+                             "Bike Routes (Proposed)"), 
+                  fill = c("darkblue", "red", "brown", "cyan",
+                           "#4D7EAB", "purple"),
+                  title = "Legend") +
+    tm_credits(text = credits) +
+    tm_scalebar()
+```
+
+The remaining five maps should be a choropleth series.
+
+-   Percentage of households with 0 vehicles
+-   Percentage of population living below the poverty line
+-   Percentage of population with a disability
+-   Percentage of population who identify as BIPOC
+-   Percentage of population age 65 and older
+
+Map each demographic variable at the Census block group level (2022). In order to provide a more specific distribution of each population, the Census data should be clipped to the extent of Lake Tahoe’s residential zones (use the District layer in the [Zoning](https://maps.trpa.org/server/rest/services/Zoning/MapServer) dataset). In each map, divide the Census block data into five (5) classes, in which the first class includes blocks with a value of 0, and the remaining four (4) classes are divided into quartiles. Each map should use the same layout for all map frames and elements (*hint: use a layout template!*), and include:
+
+-   A map frame showing the entire TRPA region, delineated by the TRPA boundary layer
+
+-   Two inset map frames focused on the Community Priority Zones in 1) South Lake Tahoe and 2) Incline Village + Kings Beach
+
+-   The number and percentage of block groups where the variable of interest \< 0.
+
+```{r}
+var.name <- "Vehicle_Available_0"
+legend.title <- "% Household Without Vehicle"
+var.name <- "Below_Poverty_Individual"
+legend.title <- "% Population Below Poverty"
+var.name <- "With_Disability"
+legend.title <- "% Population With Disability"
+# var.name <- "BIPOC"
+# legend.title <- "% Population BIPOC Identity"
+# var.name <- "Age_65_and_Over"
+# legend.title <- "% Population Age 65+"
+
+map.data <- tdc.values[, c("Total_Population", var.name)]
+var.data <- as.data.frame(tdc.values)[, c(var.name)]
+
+map.data$Percentage <- 
+    round(var.data / map.data$Total_Population * 100, 0)
+
+zero.label <- paste(
+    round(nrow(subset(map.data, Percentage > 0)) / 
+              nrow(map.data) * 100, 0), 
+    "% blocks above zero",
+    sep = ""
+)
+
+#colors <- c("lightgreen", "royalblue", "yellow", "coral", "red")
+#colors <- c("#DBE1EA", "#b9ddf1", "#cc99bb", "#a6739b", "#7c4d79")
+colors <- c("#D0DCEF", "#72BCDC", "royalblue", "#1F5591", "darkblue", "white")
+
+scale <- tm_scale_intervals(breaks = c(0, 1, 26, 51, 76, 100),
+                            values = colors,
+                            style = "fixed")
+
+tm_shape(map.data) +
+    tm_polygons(fill = "Percentage",
+                fill.scale = scale,
+                fill.legend = tm_legend(show = FALSE)) +
+    tm_shape(community.zones) +
+    tm_polygons(col = "cyan", lwd = 2, fill = NULL) +
+    tm_add_legend(type = "polygons",
+                  position = c("bottom", "left"),
+                  labels = c("0", "1 to 25", "25 to 50", 
+                             "50 to 75", "75 to 100",
+                             zero.label), 
+                  fill = c(colors),
+                  title = legend.title) +
+    tm_credits(text = credits) +
+    tm_scalebar()
+```
+
+```{r}
+# Create extents for north and south Community Priority zones
+
+north.zone <- subset(community.zones, 
+                     ZoneName %in% c("Kings Beach", "Incline"))
+
+tm_shape(north.zone) +
+    tm_polygons(col = "black") +
+    tm_shape(map.data) +
+    tm_polygons(fill = "Percentage",
+                fill.scale = scale,
+                fill.legend = tm_legend(show = FALSE)) +
+    tm_shape(north.zone) +
+    tm_polygons(col = "cyan", lwd = 2.5, fill = NULL) +
+    tm_add_legend(labels = "Kings Beach & Incline", 
+                  fill = "cyan",
+                  position = c("bottom", "left")) +
+    tm_credits(text = credits)
+```
+
+```{r}
+south.zone <- subset(community.zones, 
+                ZoneName %in% c("Tahoe Verde", "Sierra Tract", "Bijou"))
+
+tm_shape(south.zone) +
+    tm_polygons(col = "black") +
+    tm_shape(map.data) +
+    tm_polygons(fill = "Percentage",
+                fill.scale = scale,
+                fill.legend = tm_legend(show = FALSE)) +
+    tm_shape(south.zone) +
+    tm_polygons(col = "cyan", lwd = 2.5, fill = NULL) +
+    tm_add_legend(labels = "Tahoe Verde, Sierra Tract, Bijou", 
+                  fill = "cyan",
+                  position = c("bottom", "left")) +
+    tm_credits(text = credits)
+```
+
+------------------------------------------------------------------------
+
+## **Part 2: Querying the Data**
+
+Investigate the relationship between Community Priority Zones and current transportation resources and proposals by answering the questions below. You must identify the appropriate combination of TRPA data, spatial and attribute queries, and/or other methods needed to do so (feel free to use the software or language of your choice - e.g. Python, R, ArcGISPro). Present your findings in a one (1) page report that consists of brief written components, infographics, and tables; it is your responsibility to determine the most effective and informative format. Record all methods (e.g. SQL queries, tools, functions) and materials (e.g. TRPA data layers) used, as these will be reported in Part 4.
+
+1.  *Investment.* How many 2020 RTP projects in the Active Transportation category will intersect a Community Priority Zone (provide the total number and percentage of total)? What is the total estimated cost of these projects (not including those with varied costs)?
+
+2.  *Progress to Date.* As of January 2025, how many of the aforementioned Active Transportation projects have been completed? What is the name of the costliest of these projects? Which Community Priority Zone(s) does it serve? What is the name of the transit stop located within a quarter mile walk of this project?
+
+3.  *Transit Access.* What percentage of each Community Priority Zone area is within a quarter-mile walk of a transit stop? Organize these figures in a table. By this metric, which zone has the least access to transit?
+
+4.  *Trail Access.* How many proposed bike trail projects will pass through Community Priority Zones (provide the total number and percentage of proposed trails)? How many miles of bike trails will be constructed in a Community Priority Zone (provide total miles and percent increase from existing bike trail mileage)? For how many of these proposed projects has implementation already begun (i.e. started prior to 2025)?
+
+### Investment
+
+How many 2020 RTP projects in the Active Transportation category will intersect a Community Priority Zone (provide the total number and percentage of total)? What is the total estimated cost of these projects (not including those with varied costs)?
+
+```{r}
+active.projects <- 
+    subset(rtp.projects, CATEGORY == "Active Transportation")
+
+zone.areas <- st_union(community.zones)
+
+zone.intersects <- st_intersects(active.projects, zone.areas)
+
+zd <- as.data.frame(zone.intersects)
+
+zone.projects <- active.projects[zd$row.id, ]
+
+total.projects <- nrow(zone.projects)
+total.pct <- round(nrow(zone.projects) / nrow(active.projects) * 100, 0)
+
+project.costs <- as.data.frame(zone.projects) %>%
+    subset(!(ESTIMATED_COST %in% c("Varies", "")),
+           select = c(ESTIMATED_COST)) %>%
+    mutate(COST = gsub(",", "", ESTIMATED_COST),
+           COST = as.numeric(gsub("$", "", COST, fixed = TRUE)))
+
+total.costs <- dollar_format()(round(sum(project.costs$COST)))
+
+zone.intersects <- st_intersection(active.projects, zone.areas)
+
+
+#colors <- c("darkblue", "cyan", "#8DC967", "white", "white")
+colors <- c("darkblue", "cyan", "white", "white")
+
+legend.projects <- paste("Total Projects: ", total.projects,
+                         " (", total.pct, "%)", 
+                         sep = "")
+legend.costs <- paste("Total Estimated Cost: ", total.costs, sep = "")
+
+labels <- c("Active Transportation Projects",
+            "Community Priority Zones", 
+            #"Zone Intersections",
+            legend.projects,
+            legend.costs)
+
+legend.title <- ""
+map.title <- paste("Regional Transportation Plan Projects 2025",
+                   "- Investment in Community Priority Zones")
+
+tm_shape(community.zones) +
+    tm_polygons(fill = "cyan") +
+    tm_shape(zone.projects) +
+    tm_polygons(fill = "darkblue", col = "darkblue", lwd = 1) +
+    #tm_shape(zone.intersects) +
+    #tm_lines(col = "#8DC967", lwd = 1) +
+    tm_title(text = map.title,
+             just = 0.5,
+             position = c("center", "top")) +
+    tm_add_legend(type = "polygons",
+                  position = c("bottom", "left"),
+                  labels = labels, 
+                  fill = colors,
+                  title = legend.title) +
+    tm_credits(text = credits) +
+    tm_scalebar()
+```
+
+### Progress to Date
+
+As of January 2025, how many of the aforementioned Active Transportation projects have been completed? What is the name of the costliest of these projects? Which Community Priority Zone(s) does it serve? What is the name of the transit stop located within a quarter mile walk of this project?
+
+```{r}
+completed.projects <- active.projects %>%
+    subset(PHASE == "Completed") %>%
+    mutate(COST = gsub(",", "", ESTIMATED_COST),
+           COST = as.numeric(gsub("$", "", COST, fixed = TRUE)))
+
+total.completed <- nrow(completed.projects)
+pct.completed <- round(total.completed / nrow(active.projects) * 100, 0)
+
+# Find the completed project with the highest estimated cost
+max.project <- completed.projects %>%
+    arrange(desc(COST)) %>%
+    summarise(OBJECTID = first(OBJECTID),
+              PROJECT_NAME = first(PROJECT_NAME), 
+              PROJECT_COST = first(COST))
+
+max.cost <- dollar_format()(round(max(max.project$PROJECT_COST), 0))
+project.name <- max(max.project$PROJECT_NAME)
+
+max.project$geometry <- completed.projects$geometry[
+    completed.projects$OBJECTID == max.project$OBJECTID
+]
+
+# TODO: Find the zone(s)
+nearest.zone <- st_nearest_feature(max.project, community.zones)
+zone.names <- community.zones[nearest.zone, ]$ZoneName
+
+# Find nearest bus stop to max project
+nearest.stop <- st_nearest_feature(max.project, bus.stops)
+stp <- bus.stops[nearest.stop, ]
+dist <- round(st_distance(max.project, stp) * 3.2808399, 1)
+dist <- number_format(big.mark = ",")(as.numeric(dist[1]))
+
+
+colors <- c("cyan", "darkblue", "yellow", "white", "white", "brown")
+
+legend.projects <- paste("Completed Projects: ", total.completed,
+                         " (", pct.completed, "%)", 
+                         sep = "")
+legend.project.cost <- paste("Maximum Project Cost: ", max.cost,
+                      sep = "")
+legend.project.name <- paste("Project Name:", project.name)
+legend.zone.name <- paste("Serviced Zone(s):", zone.names)
+legend.bus.stop <- paste("Nearest Bus Stop:", stp$STOP_NAME,
+                         " (", dist, " feet)", sep = "")
+
+labels <- c("Community Priority Zones", 
+            legend.projects,
+            legend.project.cost,
+            legend.project.name,
+            legend.zone.name,
+            legend.bus.stop)
+
+legend.title <- ""
+map.title <- "Regional Transportation Plan 2025 - Projects Progress to Date"
+
+tm_shape(community.zones) +
+    tm_polygons(fill = "cyan") +
+    # tm_shape(community.zones) +
+    # tm_text(text = "ZoneName") +
+    tm_shape(completed.projects) +
+    tm_polygons(fill = "darkblue", col = "darkblue", lwd = 1) +
+    tm_shape(max.project) +
+    tm_polygons(fill = "yellow", col = "yellow", lwd = 2) +
+    tm_shape(stp) +
+    tm_dots(fill = "brown", size = 0.5) +
+    tm_title(text = map.title,
+             position = c("center", "top")) +
+    tm_add_legend(type = "polygons",
+                  position = c("bottom", "left"),
+                  labels = labels, 
+                  fill = colors,
+                  title = legend.title) +
+    tm_credits(text = credits) +
+    tm_scalebar()
+```
+
+### Transit Access
+
+What percentage of each Community Priority Zone area is within a quarter-mile walk of a transit stop? Organize these figures in a table. By this metric, which zone has the least access to transit?
+
+```{r}
+# Buffer each bus stop by 1/4 mile
+# Union buffered bus stops
+# Intersect bus stops union with priority zone
+# Subtract area from total priority zone area
+
+stops.buffered <- st_buffer(st_transform(bus.stops, 26910), 1609.344 * .25) %>%
+    st_union() %>%
+    st_transform(., 4326)
+
+zone.inters <- st_intersection(community.zones, stops.buffered)
+
+zone.inters$Transit_Access_Area <- st_area(zone.inters)
+
+zone.inters$Transit_Access_Percentage <-
+    with(zone.inters, Transit_Access_Area / ShapeSTArea * 100)
+
+zone.high <- zone.inters %>%
+    arrange(desc(Transit_Access_Percentage)) %>%
+    summarise(ZoneName = first(ZoneName), 
+              Transit_Access_Percentage = first(Transit_Access_Percentage))
+
+zone.legend <- paste(
+    "Highest Transit Access: ",
+    first(zone.high$ZoneName),
+    " (", round(first(zone.high$Transit_Access_Percentage), 0), "%)",
+    sep = ""
+)
+
+labels <- c("Community Priority Zones",
+            "Bus Stop Walkshed",
+            "Transit Accessible",
+            "Bus Stops",
+            zone.legend)
+
+colors <- c("cyan", "#98D16C", "#F4D166", "brown", "white")
+
+map.data <- paste("Regional Transportation Plan 2025",
+                  "- Community Priority Zones Transit Access Analysis")
+
+tm_shape(community.zones) +
+    tm_polygons(fill = "cyan") +
+    tm_shape(stops.buffered) +
+    tm_polygons(fill = "darkgreen", col = "darkgreen", fill_alpha = 0.2) +
+    tm_shape(zone.inters) +
+    tm_polygons(fill = "#F4D166", col = "yellow", lwd = 2) +
+    tm_shape(bus.stops) +
+    tm_dots(col = "brown", fill = "brown") +
+    tm_shape(community.zones) +
+    tm_text(text = "ZoneName") +
+    tm_title(text = map.title) +
+    tm_add_legend(type = "polygons",
+                  position = c("bottom", "left"),
+                  labels = labels, 
+                  fill = colors,
+                  title = legend.title) +
+    tm_credits(text = credits) +
+    tm_scalebar()
+```
+
+```{r}
+chart.data <- subset(as.data.frame(zone.inters),
+       select = c("ZoneName", "Transit_Access_Percentage")) %>%
+    mutate(Transit_Access_Percentage = 
+               round(as.numeric(Transit_Access_Percentage), 0)) %>%
+    arrange(desc(Transit_Access_Percentage))
+
+ggplot(chart.data, aes(x = as.factor(ZoneName), y = Transit_Access_Percentage)) +
+    geom_bar(stat = "identity", fill = "royalblue", col = "navy") +
+    labs(title = "Regional Transportation Plan 2025",
+         subtitle = "Community Priority Zones Transit Access Analysis",
+         x = "Community Priority Zone", y = "Accessibility (%)") +
+    theme_bw()
+```
+
+```{r}
+chart.data
+```
+
+### Trail Access
+
+How many proposed bike trail projects will pass through Community Priority Zones (provide the total number and percentage of proposed trails)? How many miles of bike trails will be constructed in a Community Priority Zone (provide total miles and percent increase from existing bike trail mileage)? For how many of these proposed projects has implementation already begun (i.e. started prior to 2025)?
+
+```{r}
+bike.inters <- st_intersects(bike.proposed, st_union(community.zones)) %>%
+    as.data.frame(.)
+
+ids <- bike.inters$row.id
+
+proposed.trails <- bike.proposed[ids, ]
+
+bike.inters <- st_intersection(bike.proposed, st_union(community.zones))
+
+proposed.count <- nrow(proposed.trails)
+proposed.pct <- round(proposed.count / nrow(bike.proposed) * 100, 0) 
+
+proposed.miles <- 
+    st_length(st_transform(st_union(bike.inters), 26910)) * 0.00062137
+
+existing.inters <- st_intersection(bike.routes, community.zones)
+
+existing.miles <- 
+    st_length(st_transform(st_union(existing.inters), 26910)) * 0.00062137
+
+
+proposed.label <- paste(proposed.count, " Proposed Trails in Zones (",
+                        proposed.pct, "% of total)",
+                        sep = "")
+
+miles.label <- paste(round(proposed.miles, 1), "Proposed Trail Miles in Zones")
+
+existing.miles.label <- paste(round(existing.miles, 1),
+                              "Existing Trail Miles in Zones")
+
+increase.pct <- round((proposed.miles) / existing.miles * 100,0)
+
+increase.label <- paste(increase.pct, "% Increase in Mileage", sep = "")
+
+proposed.started <- nrow(subset(bike.inters, START_YEAR < 2025))
+
+proposed.start.label <- paste(proposed.started, 
+                              "Proposed Trails Started as of 2025")
+
+labels <- c("Community Priority Zones",
+            proposed.label,
+            miles.label,
+            existing.miles.label,
+            increase.label,
+            proposed.start.label)
+
+colors <- c("cyan", 
+            "purple",
+            "white",
+            "white",
+            "white",
+            "white")
+
+tm_shape(community.zones, name = "Community Priority Zones") +
+    tm_polygons(fill = "cyan") +
+    #tm_shape(bike.inters, name = "Proposed Trail Mileage") +
+    #tm_lines(col = "#519E53", lwd = 5, col_alpha = 0.4) +
+    tm_shape(proposed.trails, name = "Proposed Trails") +
+    tm_lines(col = "purple", lwd = 1) +
+    #tm_shape(community.zones, name = "Zone Names") +
+    #tm_text(text = "ZoneName", size = 1, col = "black") +
+    tm_title(text = "Regional Transportation Plan 2025 - Trail Access Analysis") +
+    tm_add_legend(type = "polygons",
+                  position = c("bottom", "left"),
+                  labels = labels, 
+                  fill = colors) +
+    tm_credits(text = credits) +
+    tm_scalebar()
+```
+
+------------------------------------------------------------------------
+
+**Part 3: Integrating Data**
+
+Identification of the Community Priority Zones has helped TRPA to focus on more equitable transportation planning and investment. However, do other “transit deserts” exist? Use TRPA data to quantify and compare transit need and transit access at the 2022 Census block group-level.
+
+For the purposes of this EDA, define ***transit access*** using the percentage of each block group’s residential zone that falls within a 500-meter walkshed from a Tahoe bus stop. Note that the TRPA database only includes 1/4- and 1/2-mile walksheds. Define ***transit need*** by calculating an index based on the population of individuals who have been identified as most likely to use and/or rely on transit: seniors, BIPOC, individuals living below the poverty line, individuals with a disability, and individuals without access to a personal vehicle. To calculate the index, you will need to identify quartile 1 (i.e. Q1 or lower quartile), quartile 2 (i.e. Q2 or median), and quartile 3 (i.e. Q3 or upper quartile) thresholds for each demographic variable [when 0 values are removed from the population]{.underline}. 
+
+```{r}
+map.data <- tdc.values[, c("GEOID", "Vehicle_Available_0", "BIPOC",
+                           "Age_65_and_Over", "With_Disability",
+                           "Below_Poverty_Individual", "geometry")]
+as.data.frame(map.data)
+```
+
+```{r}
+get_quantiles <- function(var.name) {
+    x <- tdc.values[[var.name]]
+    q <- as.integer(quantile(x[x > 0], names = FALSE))
+    
+    dx <- data.frame(
+        Variable = var.name,
+        Min = q[1],
+        Q1 = q[2],
+        Q2 = q[3],
+        Q3 = q[4],
+        Max = q[5]
+    )
+    
+    dx 
+}
+
+quant.values <- rbind(
+    get_quantiles("Vehicle_Available_0"), 
+    get_quantiles("BIPOC"),
+    get_quantiles("Age_65_and_Over"),
+    get_quantiles("With_Disability"),
+    get_quantiles("Below_Poverty_Individual")
+)
+
+quant.values
+```
+
+```{r}
+chart.data <- melt(tdc.values,
+     id.vars = c("GEOID"),
+     measure.vars = c("Vehicle_Available_0", "BIPOC", "Age_65_and_Over",
+                    "With_Disability", "Below_Poverty_Individual"), 
+     value.name = "Value",
+     variable.name = "Variable")
+
+ggplot(chart.data, aes(y = Value, x = as.factor(Variable))) +
+    geom_boxplot(fill = "royalblue", staplewidth = 0.5) +
+    labs(title = "Boxplot of High Transit Need Variables",
+         x = "Variable", y = "Population") +
+    scale_y_continuous(labels = number_format(big.mark = ",")) +
+    theme_bw()
+```
+
+```{r}
+calculate_score <- function(v, vnm) {
+    q <- quant.values[quant.values["Variable"] == vnm, ]
+    
+    score <- ifelse(v > q$Q3, 4,
+                 ifelse(v > q$Q2, 3,
+                     ifelse(v > q$Q1, 2,
+                         ifelse(v > q$Min, 1, 0))))
+    score
+}
+
+needs.data <- tdc.values[, c("GEOID", "geometry")]
+
+# Calcualte scores for all variables (i.e. Transit Needs)
+
+needs.data$Vehicle_Score <- sapply(tdc.values$Vehicle_Available_0,
+        FUN = function(x) { calculate_score(x, "Vehicle_Available_0") }
+    )
+
+needs.data$BIPOC_Score <- sapply(tdc.values$BIPOC,
+        FUN = function(x) { calculate_score(x, "BIPOC") }
+    )
+
+needs.data$Age65_Score <- sapply(tdc.values$Age_65_and_Over,
+        FUN = function(x) { calculate_score(x, "Age_65_and_Over") }
+    )
+
+needs.data$Disability_Score <- sapply(tdc.values$With_Disability,
+        FUN = function(x) { calculate_score(x, "With_Disability") }
+    )
+
+needs.data$Poverty_Score <- sapply(tdc.values$Below_Poverty_Individual,
+        FUN = function(x) { calculate_score(x, "Below_Poverty_Individual") }
+    )
+
+needs.data$Need_Score <- with(map.data, (Vehicle_Score + BIPOC_Score +
+                                 Age65_Score + Disability_Score +
+                                 Poverty_Score))
+
+as.data.frame(needs.data[, c("GEOID", "Vehicle_Score", "BIPOC_Score",
+                           "Age65_Score", "Disability_Score", "Poverty_Score",
+                           "Need_Score")])
+```
+
+```{r}
+colors <- c("#D0DCEF", "#72BCDC", "royalblue", "#1F5591", "darkblue")
+
+scale <- tm_scale_intervals(breaks = c(0, 1, 6, 11, 16, 20, 25),
+                            values = colors,
+                            style = "fixed")
+
+labels <- c("0", "1 to 5", "6 to 10", "11 to 15", "16 to 20")
+
+tm_shape(needs.data) +
+    tm_polygons(fill = "Need_Score",
+                fill.scale = scale,
+                fill.legend = tm_legend(show = FALSE)) +
+    tm_add_legend(type = "polygons",
+                  position = c("bottom", "left"),
+                  labels = labels, 
+                  fill = colors,
+                  title = "Need Score") +
+    tm_title(text = "Regional Transportation Plan 2025 - Transit Need Scores") +
+    tm_credits(text = credits) +
+    tm_scalebar()
+```
+
+```{r}
+# Calculate score for population within 500m walkshed of bus stop 
+# (i.e. Transit Access)
+
+stops.buffered <- st_buffer(st_transform(bus.stops, 26910), 500) %>%
+    st_union() %>%
+    st_transform(., 4326)
+
+tdc.inters <- st_intersection(tdc.values, stops.buffered)
+
+tdc.inters$Access_Area <- st_area(tdc.inters)
+
+tdc.inters$Access_Percentage <- round(as.numeric(
+    with(tdc.inters, Access_Area / ShapeSTArea * 100)
+), 0)
+
+tdc.inters$Access_Score <- sapply(tdc.inters$Access_Percentage,
+    FUN = function(x) {
+        score <- ifelse(x >= 75, 4,
+                     ifelse(x >= 50, 3,
+                         ifelse(x >= 25, 2, 
+                             ifelse(x >= 1, 1, 0))))
+        score
+    })
+
+as.data.frame(tdc.inters[, c("GEOID", "Access_Percentage", "Access_Score")])
+```
+
+```{r}
+colors <- c("#D0DCEF", "#72BCDC", "royalblue", "#1F5591", "darkblue")
+
+scale <- tm_scale_intervals(breaks = c(0, 1, 2, 3, 4, 5),
+                            values = colors,
+                            style = "fixed")
+
+labels <- c("0", "1", "2", "3", "4")
+
+access.data <- tdc.inters[, c("GEOID", "Access_Percentage", "Access_Score")]
+
+tm_shape(access.data) +
+    tm_polygons(fill = "Access_Score", 
+                fill.scale = scale,
+                fill.legend = tm_legend(show = FALSE)) +
+    tm_add_legend(type = "polygons",
+                  position = c("bottom", "left"),
+                  labels = labels, 
+                  fill = colors,
+                  title = "Access Score") +
+    tm_title(text = "Regional Transportation Plan 2025 - Transit Access Scores") +
+    tm_credits(text = credits) +
+    tm_scalebar()
+```
+
+```{r}
+# Bivariate map representing Access vs Need correlation
+
+source("bivariate_tmap.R")
+```
+
+```{r}
+a <- subset(as.data.frame(access.data), select = c("GEOID", "Access_Score"))
+n <- subset(needs.data, select = c("GEOID", "Need_Score", "geometry"))
+
+transit.data <- merge(n, a, by.x = "GEOID", by.y = "GEOID",
+                      all = TRUE)
+transit.data$Access_Score[is.na(transit.data$Access_Score)] <- 0
+
+as.data.frame(transit.data)
+```
+
+```{r}
+map.data <- bi_class(transit.data, 
+                     x = "Need_Score", y = "Access_Score", 
+                     style = "quantile", dim = 3)
+map.data
+```
+
+```{r}
+colors <- c(
+    "#d7dbdd", "#ebdef0", "#8e44ad",
+    "#7dcea0", "#5d6d7e", "#512e5f",
+    "#196f3d", "#0b5345", "#2e4053"
+)
+
+tm_shape(map.data) +
+    tm_polygons(fill = "bi_class",
+                fill.scale = tm_scale_categorical(values = colors),
+                fill_alpha = 1,
+                fill.legend = tm_legend(show = FALSE)) +
+    tm_title(text = "Regional Transportation Plan 2025 - Transit Need & Access") +
+    tm_credits(text = credits) +
+    tm_scalebar()
+```
+
+```{r}
+colors1 <- c("#D0DCEF", "#72BCDC", "royalblue", "#1F5591", "darkblue")
+colors2 <- c("white", "yellow", "orange", "red", "darkred")
+
+scale2 <- tm_scale_intervals(breaks = c(0, 1, 2, 3, 4, 5),
+                            values = colors1,
+                            style = "fixed")
+
+scale1 <- tm_scale_intervals(breaks = c(0, 1, 6, 11, 16, 20, 25),
+                            values = colors2,
+                            style = "fixed")
+
+# tm_shape(map.data) +
+#     tm_polygons(fill = "bi_class",
+#                 fill.legend = tm_legend(show = TRUE),
+#                 fill.scale = tm_scale_bivariate(
+#                     scale1 = scale1,
+#                     scale2 = scale2,
+#                     values = "purple_green"
+#                 ))
+```
+
+```{r}
+colors <- c(
+    "1-1" = "#d7dbdd", 
+    "2-1" = "#7dcea0", 
+    "3-1" = "#196f3d", 
+    "1-2" = "#ebdef0", 
+    "2-2" = "#5d6d7e", 
+    "3-2" = "#0b5345", 
+    "1-3" = "#8e44ad",
+    "2-3" = "#512e5f",
+    "3-3" = "#2e4053"
+)
+
+chart.plot <- ggplot() +
+    geom_sf(data = map.data, mapping = aes(fill = bi_class), 
+            color = "black", size = 0.1, show.legend = FALSE) +
+    bi_scale_fill(pal = colors, dim = 3) +
+    bi_theme()
+
+legend <- bi_legend(pal = colors,
+                    dim = 3,
+                    xlab = "Need",
+                    ylab = "Access",
+                    size = 8)
+
+ggdraw() +
+    draw_plot(chart.plot, 0, 0, 1, 1) +
+    draw_plot(legend, 0.2, 0.1, 0.2, 0.2)
+```
+
+------------------------------------------------------------------------
+
+Bivariate Choropleth Maps: A How-to Guide
+
+<https://www.joshuastevens.net/cartography/make-a-bivariate-choropleth-map/>
+
+GitHub - sdesabbata/BivariateTMap: A simple function to create bivariate Choropleth maps in R tmap
+
+<https://github.com/sdesabbata/BivariateTMap>
