@@ -2,7 +2,7 @@
 
 **Visualizing and Querying Geospatial Data**
 
-This R notebook performs analysis for the Unit 2 project.
+This R notebook performs analysis for the Unit 2 project. The datasets were downloaded from Tahoe Open Data in GeoJSON format for local processing.
 
 ------------------------------------------------------------------------
 
@@ -11,7 +11,6 @@ library(tidyverse)
 library(ggplot2)
 library(tmap)
 library(tmaptools)
-library(spdep)
 library(sf)
 library(here)
 library(scales)
@@ -26,9 +25,7 @@ tmap_mode(mode = "view")
 
 ```{r}
 url <- here("Unit 2", "tahoe open data", "District.geojson")
-
 districts <- st_read(dsn = url)
-
 head(as.data.frame(districts), 50)
 ```
 
@@ -39,7 +36,6 @@ tm_shape(districts) +
 
 ```{r}
 # Dissolve districts into single sfc.
-
 districts.combined <- st_make_valid(districts) %>% st_union()
 ```
 
@@ -75,30 +71,15 @@ bus.routes <- st_read(dsn = url)
 ```
 
 ```{r}
-# as.data.frame(bus.routes) %>% group_by(ROUTE_TYPE) %>% summarise()
-```
-
-```{r}
-bike.routes <- st_read(here("Unit 1", "tahoe open data",
-                            "Bike_Trails_Existing.geojson"))
-
-bike.proposed <- st_read(here("Unit 1", "tahoe open data", 
-                              "Bike_Trails_Proposed.geojson"))
-```
-
-```{r}
-url <- here("Unit 2", "tahoe open data", "Tahoe_BlockGroup_2022_TDC_Values.geojson")
+url <- here("Unit 2", "tahoe open data", 
+            "Tahoe_BlockGroup_2022_TDC_Values.geojson")
 tdc.values <- st_read(dsn = url)
 ```
 
 ```{r}
-url <- here("Unit 1", "tahoe open data", "2020_Regional_Transportation_Plan_Projects.geojson")
+url <- here("Unit 1", "tahoe open data",
+            "2020_Regional_Transportation_Plan_Projects.geojson")
 rtp.projects <- st_read(dsn = url)
-```
-
-```{r}
-url <- here("Unit 1", "tahoe open data", "Tahoe_Bus_Stops.geojson")
-bus.stops <- st_read(dsn = url)
 ```
 
 ```{r}
@@ -126,7 +107,7 @@ credits <- paste("Tiles (c) Esri - Esri, DeLome, NAVTEQ,",
 tm_shape(boundary, name = "TRPA Boundary") +
     tm_polygons(col = "darkblue", fill = NULL, lwd = 2) +
     tm_shape(bus.stops, name = "Bus Stops") +
-    tm_dots(fill = "red", size = 0.3) +
+    tm_dots(fill = "red", size = 0.4) +
     tm_shape(community.zones, name = "Priority Zones") +
     tm_polygons(fill = "cyan") +
     tm_shape(bus.routes, name = "Bus Routes") +
@@ -138,14 +119,17 @@ tm_shape(boundary, name = "TRPA Boundary") +
     tm_shape(community.zones, name = "Priority Zone Names") +
     tm_text(text = "ZoneName", size = 1.3, col = "black") +
     tm_title(text = "Regional Transportation Plan 2025 - Lake Tahoe Region") +
-    tm_add_legend(type = "symbols",
+    tm_add_legend(type = "polygons",
                   position = c("bottom", "left"),
-                  labels = c("TRPA Boundary", "Bus Stops", "Bus Routes",
-                             "Priority Zones", "Bike Routes (Existing)",
-                             "Bike Routes (Proposed)"), 
-                  fill = c("darkblue", "red", "brown", "cyan",
-                           "#4D7EAB", "purple"),
-                  title = "Legend") +
+                  labels = c("Bus Stops", "Community Priority Zones"), 
+                  fill = c("red", "cyan")) +
+    tm_add_legend(type = "lines",
+                  position = c("bottom", "left"),
+                  labels = c("TRPA Boundary", "Bus Routes",
+                             "Bike Routes (Existing)",
+                             "Bike Routes (Proposed)"),
+                  col = c("darkblue", "brown", "#4D7EAB", "purple"),
+                  lwd = 3) +
     tm_credits(text = credits) +
     tm_scalebar()
 ```
@@ -167,91 +151,162 @@ Map each demographic variable at the Census block group level (2022). In order t
 -   The number and percentage of block groups where the variable of interest \< 0.
 
 ```{r}
-var.name <- "Vehicle_Available_0"
-legend.title <- "% Household Without Vehicle"
-var.name <- "Below_Poverty_Individual"
-legend.title <- "% Population Below Poverty"
-var.name <- "With_Disability"
-legend.title <- "% Population With Disability"
-# var.name <- "BIPOC"
-# legend.title <- "% Population BIPOC Identity"
-# var.name <- "Age_65_and_Over"
-# legend.title <- "% Population Age 65+"
+# Define map functions to consolidate code for generating map data and visuals
 
-map.data <- tdc.values[, c("Total_Population", var.name)]
-var.data <- as.data.frame(tdc.values)[, c(var.name)]
+get_demographic_map_data <- function(var.name, denominator) {
+    map.data <- tdc.values[, c(denominator, var.name)]
+    var.data <- as.data.frame(tdc.values)[, c(var.name)]
+    
+    map.data$Percentage <- round(var.data / map.data[[denominator]] * 100, 0)
+    
+    map.data
+}
 
-map.data$Percentage <- 
-    round(var.data / map.data$Total_Population * 100, 0)
+get_demographic_map <- function(var.name, denominator, legend.title) {
+    map.data <- get_demographic_map_data(var.name, denominator)
+    
+    zero.label <- paste(
+        round(nrow(subset(map.data, Percentage > 0)) / 
+                  nrow(map.data) * 100, 0), 
+        "% blocks above zero",
+        sep = ""
+    )
+    
+    colors <- c("#DBE1EA", "#b9ddf1", "#cc99bb", "#a6739b", "#7c4d79", "white")
+    
+    scale <- tm_scale_intervals(breaks = c(0, 1, 26, 51, 76, 100),
+                                values = colors,
+                                style = "fixed")
+    
+    map <- tm_shape(map.data, name = "Percentage") +
+        tm_polygons(fill = "Percentage",
+                    fill.scale = scale,
+                    fill.legend = tm_legend(show = FALSE)) +
+        tm_shape(community.zones, name = "Community Priority Zones") +
+        tm_polygons(col = "cyan", lwd = 2, fill = NULL) +
+        tm_add_legend(type = "polygons",
+                      position = c("bottom", "left"),
+                      labels = c("0", "1 to 25", "25 to 50", 
+                                 "50 to 75", "75 to 100",
+                                 zero.label), 
+                      fill = c(colors),
+                      title = legend.title) +
+        tm_credits(text = credits) +
+        tm_scalebar()
+    map
+}
 
-zero.label <- paste(
-    round(nrow(subset(map.data, Percentage > 0)) / 
-              nrow(map.data) * 100, 0), 
-    "% blocks above zero",
-    sep = ""
-)
-
-#colors <- c("lightgreen", "royalblue", "yellow", "coral", "red")
-#colors <- c("#DBE1EA", "#b9ddf1", "#cc99bb", "#a6739b", "#7c4d79")
-colors <- c("#D0DCEF", "#72BCDC", "royalblue", "#1F5591", "darkblue", "white")
-
-scale <- tm_scale_intervals(breaks = c(0, 1, 26, 51, 76, 100),
-                            values = colors,
-                            style = "fixed")
-
-tm_shape(map.data) +
-    tm_polygons(fill = "Percentage",
-                fill.scale = scale,
-                fill.legend = tm_legend(show = FALSE)) +
-    tm_shape(community.zones) +
-    tm_polygons(col = "cyan", lwd = 2, fill = NULL) +
-    tm_add_legend(type = "polygons",
-                  position = c("bottom", "left"),
-                  labels = c("0", "1 to 25", "25 to 50", 
-                             "50 to 75", "75 to 100",
-                             zero.label), 
-                  fill = c(colors),
-                  title = legend.title) +
-    tm_credits(text = credits) +
-    tm_scalebar()
+get_demographic_inset_map <- function(var.name, zone.names, denominator) {
+    # Create extents for north and south Community Priority zones
+    map.data <- get_demographic_map_data(var.name, denominator)
+    
+    zone.data <- subset(community.zones, ZoneName %in% zone.names)
+    
+    colors <- c("#DBE1EA", "#b9ddf1", "#cc99bb", "#a6739b", "#7c4d79", "white")
+    
+    scale <- tm_scale_intervals(breaks = c(0, 1, 26, 51, 76, 100),
+                                values = colors,
+                                style = "fixed")
+    
+    map <- tm_shape(zone.data, name = "Area") +
+        tm_polygons(col = "black") +
+        tm_shape(map.data, name = "Percentages") +
+        tm_polygons(fill = "Percentage",
+                    fill.scale = scale,
+                    fill.legend = tm_legend(show = FALSE)) +
+        tm_shape(zone.data, name = "Zones") +
+        tm_polygons(col = "cyan", lwd = 2.5, fill = NULL) +
+        tm_add_legend(labels = paste(zone.names, collapse = ", "),
+                      fill = "cyan",
+                      position = c("bottom", "left")) +
+        tm_credits(text = credits)
+    map
+}
 ```
 
 ```{r}
-# Create extents for north and south Community Priority zones
-
-north.zone <- subset(community.zones, 
-                     ZoneName %in% c("Kings Beach", "Incline"))
-
-tm_shape(north.zone) +
-    tm_polygons(col = "black") +
-    tm_shape(map.data) +
-    tm_polygons(fill = "Percentage",
-                fill.scale = scale,
-                fill.legend = tm_legend(show = FALSE)) +
-    tm_shape(north.zone) +
-    tm_polygons(col = "cyan", lwd = 2.5, fill = NULL) +
-    tm_add_legend(labels = "Kings Beach & Incline", 
-                  fill = "cyan",
-                  position = c("bottom", "left")) +
-    tm_credits(text = credits)
+get_demographic_map("Vehicle_Available_0", "Total_Households", 
+                    "% Households Without Vehicle")
 ```
 
 ```{r}
-south.zone <- subset(community.zones, 
-                ZoneName %in% c("Tahoe Verde", "Sierra Tract", "Bijou"))
+get_demographic_inset_map("Vehicle_Available_0", 
+                          c("Kings Beach", "Incline"), 
+                          "Total_Households")
+```
 
-tm_shape(south.zone) +
-    tm_polygons(col = "black") +
-    tm_shape(map.data) +
-    tm_polygons(fill = "Percentage",
-                fill.scale = scale,
-                fill.legend = tm_legend(show = FALSE)) +
-    tm_shape(south.zone) +
-    tm_polygons(col = "cyan", lwd = 2.5, fill = NULL) +
-    tm_add_legend(labels = "Tahoe Verde, Sierra Tract, Bijou", 
-                  fill = "cyan",
-                  position = c("bottom", "left")) +
-    tm_credits(text = credits)
+```{r}
+get_demographic_inset_map("Vehicle_Available_0", 
+                          c("Tahoe Verde", "Sierra Tract", "Bijou"),
+                          "Total_Households")
+```
+
+```{r}
+get_demographic_map("Below_Poverty_Individual", "Total_Population", 
+                    "% Population Below Poverty")
+```
+
+```{r}
+get_demographic_inset_map("Below_Poverty_Individual", 
+                          c("Kings Beach", "Incline"), 
+                          "Total_Population")
+```
+
+```{r}
+get_demographic_inset_map("Below_Poverty_Individual", 
+                          c("Tahoe Verde", "Sierra Tract", "Bijou"),
+                          "Total_Population")
+```
+
+```{r}
+get_demographic_map("With_Disability", "Total_Population", 
+                    "% Population With Disability")
+```
+
+```{r}
+get_demographic_inset_map("With_Disability", 
+                          c("Kings Beach", "Incline"), 
+                          "Total_Population")
+```
+
+```{r}
+get_demographic_inset_map("With_Disability", 
+                          c("Tahoe Verde", "Sierra Tract", "Bijou"),
+                          "Total_Population")
+```
+
+```{r}
+get_demographic_map("BIPOC", "Total_Population", 
+                    "% Population BIPOC Identify")
+```
+
+```{r}
+get_demographic_inset_map("BIPOC", 
+                          c("Kings Beach", "Incline"), 
+                          "Total_Population")
+```
+
+```{r}
+get_demographic_inset_map("BIPOC", 
+                          c("Tahoe Verde", "Sierra Tract", "Bijou"),
+                          "Total_Population")
+```
+
+```{r}
+get_demographic_map("Age_65_and_Over", "Total_Population", 
+                    "% Population Age 65+")
+```
+
+```{r}
+get_demographic_inset_map("Age_65_and_Over", 
+                          c("Kings Beach", "Incline"), 
+                          "Total_Population")
+```
+
+```{r}
+get_demographic_inset_map("Age_65_and_Over", 
+                          c("Tahoe Verde", "Sierra Tract", "Bijou"),
+                          "Total_Population")
 ```
 
 ------------------------------------------------------------------------
@@ -456,8 +511,8 @@ labels <- c("Community Priority Zones",
 
 colors <- c("cyan", "#98D16C", "#F4D166", "brown", "white")
 
-map.data <- paste("Regional Transportation Plan 2025",
-                  "- Community Priority Zones Transit Access Analysis")
+map.title <- paste("Regional Transportation Plan 2025",
+            "- Community Priority Zones Transit Access Analysis")
 
 tm_shape(community.zones) +
     tm_polygons(fill = "cyan") +
@@ -491,10 +546,13 @@ ggplot(chart.data, aes(x = as.factor(ZoneName), y = Transit_Access_Percentage)) 
     labs(title = "Regional Transportation Plan 2025",
          subtitle = "Community Priority Zones Transit Access Analysis",
          x = "Community Priority Zone", y = "Accessibility (%)") +
-    theme_bw()
+    theme_bw() +
+    theme(plot.title = element_text(hjust = 0.5),
+          plot.subtitle = element_text(hjust = 0.5))
 ```
 
 ```{r}
+colnames(chart.data) <-c("Zone Name", "Transit Access %")
 chart.data
 ```
 
@@ -575,7 +633,7 @@ tm_shape(community.zones, name = "Community Priority Zones") +
 
 ------------------------------------------------------------------------
 
-**Part 3: Integrating Data**
+## **Part 3: Integrating Data**
 
 Identification of the Community Priority Zones has helped TRPA to focus on more equitable transportation planning and investment. However, do other “transit deserts” exist? Use TRPA data to quantify and compare transit need and transit access at the 2022 Census block group-level.
 
@@ -626,10 +684,12 @@ chart.data <- melt(tdc.values,
 
 ggplot(chart.data, aes(y = Value, x = as.factor(Variable))) +
     geom_boxplot(fill = "royalblue", staplewidth = 0.5) +
-    labs(title = "Boxplot of High Transit Need Variables",
+    labs(title = "Distribution of High Transit Need Variables",
          x = "Variable", y = "Population") +
     scale_y_continuous(labels = number_format(big.mark = ",")) +
-    theme_bw()
+    theme_bw() +
+    theme(plot.title = element_text(hjust = 0.5),
+          plot.subtitle = element_text(hjust = 0.5))
 ```
 
 ```{r}
@@ -667,7 +727,7 @@ needs.data$Poverty_Score <- sapply(tdc.values$Below_Poverty_Individual,
         FUN = function(x) { calculate_score(x, "Below_Poverty_Individual") }
     )
 
-needs.data$Need_Score <- with(map.data, (Vehicle_Score + BIPOC_Score +
+needs.data$Need_Score <- with(needs.data, (Vehicle_Score + BIPOC_Score +
                                  Age65_Score + Disability_Score +
                                  Poverty_Score))
 
@@ -738,7 +798,12 @@ labels <- c("0", "1", "2", "3", "4")
 
 access.data <- tdc.inters[, c("GEOID", "Access_Percentage", "Access_Score")]
 
-tm_shape(access.data) +
+tm_shape(tdc.values) +
+    tm_polygons(fill = NULL, 
+                col = "black",
+                col.alpha = 0.3,
+                lwd = 1) +
+    tm_shape(access.data) +
     tm_polygons(fill = "Access_Score", 
                 fill.scale = scale,
                 fill.legend = tm_legend(show = FALSE)) +
@@ -750,12 +815,6 @@ tm_shape(access.data) +
     tm_title(text = "Regional Transportation Plan 2025 - Transit Access Scores") +
     tm_credits(text = credits) +
     tm_scalebar()
-```
-
-```{r}
-# Bivariate map representing Access vs Need correlation
-
-source("bivariate_tmap.R")
 ```
 
 ```{r}
@@ -772,67 +831,47 @@ as.data.frame(transit.data)
 ```{r}
 map.data <- bi_class(transit.data, 
                      x = "Need_Score", y = "Access_Score", 
-                     style = "quantile", dim = 3)
-map.data
+                     style = "quantile", dim = 3, 
+                     keep_factors = FALSE)
+colnames(map.data)[5] <- "Bivar_Class"
+as.data.frame(map.data[, c("GEOID", "Need_Score", "Access_Score", "Bivar_Class")])
+```
+
+```{r}
+chart.data <- subset(map.data, 
+                     select = c("GEOID", "Need_Score", "Access_Score",
+                                "Bivar_Class"))
+
+ggplot(chart.data, aes(x = as.factor(Access_Score), y = Need_Score)) +
+    geom_boxplot(fill = "cornflowerblue", staplewidth = 0.5) +
+    geom_jitter(col = "coral") +
+    labs(title = "Regional Transportation Plan 2025",
+         subtitle = "Distribution of Transit Need by Access",
+         x = "Access Score", y = "Need Score") +
+    theme_bw() +
+    theme(plot.title = element_text(hjust = 0.5),
+          plot.subtitle = element_text(hjust = 0.5))
 ```
 
 ```{r}
 colors <- c(
-    "#d7dbdd", "#ebdef0", "#8e44ad",
-    "#7dcea0", "#5d6d7e", "#512e5f",
-    "#196f3d", "#0b5345", "#2e4053"
-)
-
-tm_shape(map.data) +
-    tm_polygons(fill = "bi_class",
-                fill.scale = tm_scale_categorical(values = colors),
-                fill_alpha = 1,
-                fill.legend = tm_legend(show = FALSE)) +
-    tm_title(text = "Regional Transportation Plan 2025 - Transit Need & Access") +
-    tm_credits(text = credits) +
-    tm_scalebar()
-```
-
-```{r}
-colors1 <- c("#D0DCEF", "#72BCDC", "royalblue", "#1F5591", "darkblue")
-colors2 <- c("white", "yellow", "orange", "red", "darkred")
-
-scale2 <- tm_scale_intervals(breaks = c(0, 1, 2, 3, 4, 5),
-                            values = colors1,
-                            style = "fixed")
-
-scale1 <- tm_scale_intervals(breaks = c(0, 1, 6, 11, 16, 20, 25),
-                            values = colors2,
-                            style = "fixed")
-
-# tm_shape(map.data) +
-#     tm_polygons(fill = "bi_class",
-#                 fill.legend = tm_legend(show = TRUE),
-#                 fill.scale = tm_scale_bivariate(
-#                     scale1 = scale1,
-#                     scale2 = scale2,
-#                     values = "purple_green"
-#                 ))
-```
-
-```{r}
-colors <- c(
-    "1-1" = "#d7dbdd", 
-    "2-1" = "#7dcea0", 
-    "3-1" = "#196f3d", 
-    "1-2" = "#ebdef0", 
-    "2-2" = "#5d6d7e", 
-    "3-2" = "#0b5345", 
-    "1-3" = "#8e44ad",
-    "2-3" = "#512e5f",
-    "3-3" = "#2e4053"
+    "1-1" = "#e8e8e8", 
+    "2-1" = "#ace4e4", 
+    "3-1" = "#5ac8c8", 
+    "1-2" = "#dfb0d6", 
+    "2-2" = "#a5add3", 
+    "3-2" = "#5698b9", 
+    "1-3" = "#be64ac",
+    "2-3" = "#8c62aa",
+    "3-3" = "#3b4994"
 )
 
 chart.plot <- ggplot() +
-    geom_sf(data = map.data, mapping = aes(fill = bi_class), 
+    geom_sf(data = map.data, mapping = aes(fill = Bivar_Class), 
             color = "black", size = 0.1, show.legend = FALSE) +
     bi_scale_fill(pal = colors, dim = 3) +
-    bi_theme()
+    labs(title = "Transit Need and Access Comparison") +
+    bi_theme(base_size = 12)
 
 legend <- bi_legend(pal = colors,
                     dim = 3,
@@ -842,10 +881,53 @@ legend <- bi_legend(pal = colors,
 
 ggdraw() +
     draw_plot(chart.plot, 0, 0, 1, 1) +
-    draw_plot(legend, 0.2, 0.1, 0.2, 0.2)
+    draw_plot(legend, 0.1, 0.1, 0.3, 0.3)
+```
+
+```{r}
+colors <- c(
+    "#e8e8e8", "#dfb0d6", "#be64ac",
+    "#ace4e4", "#a5add3", "#8c62aa",
+    "#5ac8c8", "#5698b9", "#3b4994"
+)
+
+tm_shape(map.data, name = "Bivariate Classifications") +
+    tm_polygons(fill = "Bivar_Class",
+                fill.scale = tm_scale_categorical(values = colors),
+                fill_alpha = 1,
+                fill.legend = tm_legend(show = FALSE)) +
+    tm_title(text = paste("Regional Transportation Plan 2025",
+                          "- Transit Need and Access Comparison")) +
+    tm_credits(text = credits) +
+    tm_scalebar()
+```
+
+```{r}
+# colors <- c(
+#     "#e8e8e8", "#dfb0d6", "#be64ac",
+#     "#ace4e4", "#a5add3", "#8c62aa",
+#     "#5ac8c8", "#5698b9", "#3b4994"
+# )
+# scale2 <- tm_scale_categorical()
+# scale1 <- tm_scale_categorical()
+# 
+# tm_shape(map.data) +
+#     tm_polygons(fill = "Bivar_Class",
+#                 fill.legend = tm_legend(show = TRUE),
+#                 fill.scale = tm_scale_bivariate(
+#                     scale1 = scale1,
+#                     scale2 = scale2,
+#                     values = colors,
+#                     values.range = c(0, 1),
+#                     labels = c("Need", "Access")
+#                 ))
 ```
 
 ------------------------------------------------------------------------
+
+# Appendix
+
+Some various articles I tried or used in this data analysis.
 
 Bivariate Choropleth Maps: A How-to Guide
 
